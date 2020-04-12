@@ -1,0 +1,4 @@
+[
+	{ "keys": ["ctrl+shift+insert"], "command": "new_note" },
+	{ "keys": ["ctrl+1"], "command": "make_todo" },
+]
