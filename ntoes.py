@@ -1,5 +1,7 @@
 import datetime
 import os
+import threading
+import time
 
 import sublime
 import sublime_plugin
@@ -16,7 +18,7 @@ class NewNoteCommand(sublime_plugin.WindowCommand):
 		note_view.set_name(title + '.md')
 		note_view.run_command('append', {'characters': '# {}\n\n'.format(title)})
 		note_view.run_command('move_to', {'to': 'eof', 'extend': False})
-		note_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
+		note_view.assign_syntax('Packages/MarkdownEditing/Markdown.sublime-syntax')
 
 		s = sublime.load_settings("Ntoes.sublime-settings")
 
@@ -48,35 +50,117 @@ class MakeTodoCommand(sublime_plugin.TextCommand):
 			old_str = self.view.substr(old_region)
 			if old_str == '[X] ':
 				self.view.erase(edit, old_region)
-			elif old_str[0] == '[' and old_str[2:4] == '] ':
+			elif len(old_str) >= 4 and old_str[0] == '[' and old_str[2:4] == '] ':
 				self.view.replace(edit, old_region, '[X] ')
 			else:
 				self.view.insert(edit, region.begin(), '[ ] ')
 
-
 	def description(self):
-		return "Toggles the current line's TODO item."
+		return "Toggles the current line's TODO item status."
+
+
+class UpdateTodoViewCommand(sublime_plugin.TextCommand):
+	def run(self, edit, text):
+		self.view.replace(edit, sublime.Region(8, self.view.size()), text)
+		self.view.run_command('move_to', {"extend": False, "to": "bol"})
+
+
+class TodoList:
+	def __init__(self):
+		self.note_files = {}
+		self.todo_view = None
+		self.scan_thread = None
+		self.cancel_scanning = False
+		self.wakeup_event = threading.Event()
+
+	def start_scanning(self):
+		if self.scan_thread is None:
+			self.scan_thread = threading.Thread(target=self.scan_forever, daemon=True)
+			self.scan_thread.start()
+
+	def stop_scanning(self):
+		self.cancel_scanning = True
+
+	def is_scanning(self):
+		return self.scan_thread is not None
+
+	def add_note_file(self, file_path):
+		st = os.stat(file_path)
+		self.note_files[file_path] = {
+			"mtime": st.st_mtime,
+			"todos": []
+		}
+
+	def scan_file(self, file_path):
+		print('SCAN', file_path)
+		todos = []
+		with open(file_path) as file:
+			for line_index, line in enumerate(file.readlines()):
+				if '[ ]' in line:
+					todos.append({'line': line_index, 'text': line})
+
+		self.note_files[file_path]['todos'] = todos
+
+	def update_view(self):
+		if self.todo_view is None:
+			return
+
+		text = ''
+		for file_path in sorted(self.note_files.keys(), reverse=True):
+			fields = self.note_files[file_path]
+			if len(fields['todos']):
+				text += '# {}\n\n'.format(os.path.basename(file_path))
+				for todo in fields['todos']:
+					text += todo['text']
+				text += '\n'
+
+		self.todo_view.run_command('update_todo_view', {'text': text})
+		# self.todo_view.run_command('move_to', {"extend": False, "to": "bol"})
+		# self.todo_view.run_command('select_all')
+		# self.todo_view.run_command('overwrite', {'characters': text})
+
+	def scan_dir(self):
+		print('SCAN_DIR')
+		s = sublime.load_settings("Ntoes.sublime-settings")
+		base_dir = s.get("base_dir", "~/ntoes/")
+		base_dir = os.path.expanduser(base_dir)
+
+		note_paths = []
+
+		for dirpath, _, filenames in os.walk(base_dir):
+			for file_name in filenames:
+				if file_name.endswith('.md'):
+					file_path = os.path.join(dirpath, file_name)
+					note_paths.append(file_path)
+			
+
+		for file_path in sorted(note_paths, reverse=True):
+			st = os.stat(file_path)
+
+			if file_path in self.note_files:
+				fields = self.note_files[file_path]
+				if st.st_mtime <= fields["mtime"]:
+					continue
+				fields["mtime"] = st.st_mtime
+
+			else:
+				self.add_note_file(file_path)
+
+			self.scan_file(file_path)
+			self.update_view()
+
+	def scan_forever(self):
+		while not self.cancel_scanning:
+			self.scan_dir()
+			self.wakeup_event.wait(60)
+			self.wakeup_event.clear()
+
+
+todo_list = TodoList()
 
 
 class ShowTodoCommand(sublime_plugin.WindowCommand):
 	def run(self):
-		# sublime.run_command('show_panel', {
-		# 	'panel': 'find_in_files',
-		# 	'regular_expression': False,
-		# 	'case_sensitive': False,
-		# 	'whole_word': True,
-		# 	'in_selection': False,
-		# 	'wrap': True,
-		# 	'highlight_matches': False
-		# 	})
-		# sublime.run_command('find_all', {
-		# 	'close_panel': True
-		# 	})
-		# self.window.run_command('set_layout', {
-		# 	"cells": [[0, 0, 1, 1], [1, 0, 2, 1]], 
-		# 	"cols": [0.0, 0.7, 1.0], "rows": [0.0, 1.0]
-		# 	})
-
 		todo_view = None
 		for view in self.window.views():
 			if view.name() == 'TODO':
@@ -85,7 +169,10 @@ class ShowTodoCommand(sublime_plugin.WindowCommand):
 		if todo_view is None:
 			todo_view = self.window.new_file()
 			todo_view.set_name('TODO')
-			todo_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
+			todo_view.settings().set('gutter', False)
+			todo_view.assign_syntax('Packages/MarkdownEditing/Markdown.sublime-syntax')
+			todo_view.run_command('overwrite', {'characters': '# TODO\n\n'})
+			todo_view.run_command('move_to', {"extend": False, "to": "bof"})
 			self.window.run_command('new_pane')
 
 		self.window.run_command('set_layout', {
@@ -93,38 +180,15 @@ class ShowTodoCommand(sublime_plugin.WindowCommand):
 			"cols": [0.0, 0.7, 1.0], "rows": [0.0, 1.0]
 			})
 
-		self.scan_todo(todo_view)
-
-	def scan_todo(self, todo_view):
-		todo_view.run_command('select_all')
-		todo_view.run_command('right_delete')
-
-		s = sublime.load_settings("Ntoes.sublime-settings")
-
-		base_dir = s.get("base_dir", "~/ntoes/")
-		base_dir = os.path.expanduser(base_dir)
-
-		for dirpath, dirnames, filenames in os.walk(base_dir):
-			for file_name in filenames:
-				if file_name.endswith('.md'):
-					file_path = os.path.join(dirpath, file_name)
-					print(file_path)
-					with open(file_path) as file:
-						first_todo_in_file = True
-						for line in file.readlines():
-							if '[ ]' in line:
-								if first_todo_in_file:
-									todo_view.run_command('append', {'characters': '# ' + file_name + '\n\n'})
-									first_todo_in_file = False
-								todo_view.run_command('append', {'characters': line})
-						if not first_todo_in_file:
-							todo_view.run_command('append', {'characters': '\n'})
+		if not todo_list.is_scanning():
+			todo_list.todo_view = todo_view
+			todo_list.start_scanning()
+		else:
+			todo_list.wakeup_event.set()
 
 
-
-class SetNotesDirCommand(sublime_plugin.ApplicationCommand):
+class SetNotesDirCommand(sublime_plugin.WindowCommand):
 	def run(self):
-		date_title = datetime.date.today().isoformat()
 		self.window.show_input_panel('Notes Directory', "~/ntoes", self.on_set_notes_dir, None, None)
 
 	def on_set_notes_dir(self, base_dir):
@@ -137,3 +201,7 @@ class SetNotesDirCommand(sublime_plugin.ApplicationCommand):
 		s.set("base_dir", base_dir)
 
 		sublime.save_settings("Ntoes.sublime-settings")
+
+
+def plugin_unloaded():
+	todo_list.stop_scanning()
