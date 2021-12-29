@@ -1,5 +1,6 @@
 [
 	{ "keys": ["ctrl+shift+insert"], "command": "new_note" },
+	{ "keys": ["ctrl+shift+period"], "command": "show_note" },
 	{ "keys": ["alt+shift+home"], "command": "show_todo" },
 	{ "keys": ["ctrl+1"], "command": "make_todo" },
 ]
