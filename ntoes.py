@@ -30,6 +30,11 @@ class TodoList:
 		threading.Thread(target=self.scan_forever, daemon=True).start()
 		threading.Thread(target=self.sync_forever, daemon=True).start()
 
+	def on_unload(self):
+		todo_list.unload_requested = True
+		self.scan_event.set()
+		self.sync_event.set()
+
 	def get_base_dir(self):
 		s = sublime.load_settings("Ntoes.sublime-settings")
 		base_dir = s.get("base_dir", "~/ntoes/")
@@ -92,14 +97,22 @@ class TodoList:
 		base_dir = self.get_base_dir()
 		note_paths = []
 
+		# Stop tracking files that have been removed.
+		removed_files = []
+		for file_path in self.note_files.keys():
+			if not os.path.exists(file_path):
+				removed_files.append(file_path)
+		for file_path in removed_files:
+			del self.note_files[file_path]
+
+		# Collect a list of files that exist.
 		for dirpath, _, filenames in os.walk(base_dir):
 			for file_name in filenames:
 				if file_name.endswith('.md'):
 					file_path = os.path.join(dirpath, file_name)
 					note_paths.append(file_path)
 
-		# TODO: Handle deleted note files here.
-		
+		# Scan files that have been changed or are new.
 		for file_path in sorted(note_paths, reverse=True):
 			st = os.stat(file_path)
 
@@ -365,4 +378,4 @@ class SyncNotesCommand(sublime_plugin.WindowCommand):
 
 
 def plugin_unloaded():
-	todo_list.unload_requested = True
+	todo_list.on_unload()
