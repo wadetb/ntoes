@@ -1,0 +1,5 @@
+[
+	{ "keys": ["ctrl+shift+insert"], "command": "new_note" },
+	{ "keys": ["alt+shift+home"], "command": "show_todo" },
+	{ "keys": ["ctrl+1"], "command": "make_todo" },
+]
