@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 import threading
 import time
 
@@ -18,7 +19,7 @@ class NewNoteCommand(sublime_plugin.WindowCommand):
 		note_view.set_name(title + '.md')
 		note_view.run_command('append', {'characters': '# {}\n\n'.format(title)})
 		note_view.run_command('move_to', {'to': 'eof', 'extend': False})
-		note_view.assign_syntax('Packages/MarkdownEditing/Markdown.sublime-syntax')
+		note_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
 
 		s = sublime.load_settings("Ntoes.sublime-settings")
 
@@ -32,6 +33,59 @@ class NewNoteCommand(sublime_plugin.WindowCommand):
 		os.makedirs(base_dir, 0o777, True)
 
 		note_view.settings().set('default_dir', base_dir)
+		note_view.settings().set('base_dir', s.get("base_dir", "~/ntoes/"))
+
+
+class ShowNoteCommand(sublime_plugin.TextCommand):
+	def run(self, edit):
+		s = self.view.settings()
+
+		for region in self.view.sel():
+			todo_line = self.view.line(region.a)
+			todo_text = self.view.substr(todo_line)
+			print(todo_line, todo_text)
+
+			line_re = re.compile(r'\[.\] (.*)')
+			todo_m = line_re.match(todo_text)
+			if not todo_m:
+				print('Not a TODO line, no sync.')
+				return
+			todo_desc = todo_m.group(1)
+
+			file_heading_line, file_heading_text = todo_line, None
+			while file_heading_line.a > 0:
+				file_heading_line = self.view.line(sublime.Region(file_heading_line.a - 1))
+				file_heading_text = self.view.substr(file_heading_line)
+				if file_heading_text.startswith('# '):
+					break
+			if file_heading_text is None:
+				print('No file header for this TODO.')
+				return
+			file_name = file_heading_text[2:]
+
+			note_date = datetime.datetime.strptime(file_name[:7], '%Y-%m')
+			base_dir = s.get("todo_base_dir")
+			base_dir = os.path.expanduser(base_dir)
+			base_dir = os.path.join(base_dir, str(note_date.year))
+			base_dir = os.path.join(base_dir, str(note_date.strftime('%m - %B')))
+
+			file_path = os.path.join(base_dir, file_name)
+			# print(file_heading_line, file_heading_text, file_name, file_path)
+			
+			with open(file_path) as file:
+				all_lines = file.readlines()
+				
+				for line_index, line in enumerate(all_lines):
+					line_m = line_re.match(line)
+					if line_m:
+						line_desc = line_m.group(1)
+						if line_desc == todo_desc:
+							print('found at', line_index, line_desc)
+							all_lines[line_index] = todo_text + '\n'
+							break
+
+			self.view.window().open_file("{}:{}:{}".format(file_path, line_index + 1, 0), sublime.ENCODED_POSITION, 0)
+			# sublime.run_command('move_to_group', {'group': 0})
 
 
 class MakeTodoCommand(sublime_plugin.TextCommand):
@@ -133,7 +187,6 @@ class TodoList:
 					file_path = os.path.join(dirpath, file_name)
 					note_paths.append(file_path)
 			
-
 		for file_path in sorted(note_paths, reverse=True):
 			st = os.stat(file_path)
 
@@ -159,6 +212,67 @@ class TodoList:
 todo_list = TodoList()
 
 
+class TodoListener(sublime_plugin.ViewEventListener):
+	@classmethod
+	def is_applicable(cls, settings):
+		# print('is_applicable', settings, settings.get('is_todo'))
+		return settings.get('todo_base_dir') is not None
+
+	def on_modified(self):
+		# print('on_modified', self)
+		# print(self.view.sel())
+
+		s = self.view.settings()
+
+		for region in self.view.sel():
+			todo_line = self.view.line(region.a)
+			todo_text = self.view.substr(todo_line)
+			# print(todo_line, todo_text)
+
+			line_re = re.compile(r'\[.\] (.*)')
+			todo_m = line_re.match(todo_text)
+			if not todo_m:
+				print('Not a TODO line, no sync.')
+				return
+			todo_desc = todo_m.group(1)
+
+			file_heading_line, file_heading_text = todo_line, None
+			while file_heading_line.a > 0:
+				file_heading_line = self.view.line(sublime.Region(file_heading_line.a - 1))
+				file_heading_text = self.view.substr(file_heading_line)
+				if file_heading_text.startswith('# '):
+					break
+			if file_heading_text is None:
+				print('No file header for this TODO.')
+				return
+			file_name = file_heading_text[2:]
+
+			note_date = datetime.datetime.strptime(file_name[:7], '%Y-%m')
+			base_dir = s.get("todo_base_dir")
+			base_dir = os.path.expanduser(base_dir)
+			base_dir = os.path.join(base_dir, str(note_date.year))
+			base_dir = os.path.join(base_dir, str(note_date.strftime('%m - %B')))
+
+			file_path = os.path.join(base_dir, file_name)
+			# print(file_heading_line, file_heading_text, file_name, file_path)
+			
+			with open(file_path) as file:
+				all_lines = file.readlines()
+				
+				for line_index, line in enumerate(all_lines):
+					line_m = line_re.match(line)
+					if line_m:
+						line_desc = line_m.group(1)
+						if line_desc == todo_desc:
+							# print('found at', line_index, line_desc)
+							all_lines[line_index] = todo_text + '\n'
+							break
+			# print(all_lines)
+
+			with open(file_path, 'w') as file:
+				file.writelines(all_lines)
+
+
 class ShowTodoCommand(sublime_plugin.WindowCommand):
 	def run(self):
 		todo_view = None
@@ -169,8 +283,14 @@ class ShowTodoCommand(sublime_plugin.WindowCommand):
 		if todo_view is None:
 			todo_view = self.window.new_file()
 			todo_view.set_name('TODO')
+
 			todo_view.settings().set('gutter', False)
-			todo_view.assign_syntax('Packages/MarkdownEditing/Markdown.sublime-syntax')
+			todo_view.settings().set('is_todo', True)
+
+			s = sublime.load_settings("Ntoes.sublime-settings")
+			todo_view.settings().set('todo_base_dir', s.get("base_dir", "~/ntoes/"))
+
+			todo_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
 			todo_view.run_command('overwrite', {'characters': '# TODO\n\n'})
 			todo_view.run_command('move_to', {"extend": False, "to": "bof"})
 			self.window.run_command('new_pane')
