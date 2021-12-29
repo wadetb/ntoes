@@ -1,10 +1,7 @@
 import datetime
 import os
-<<<<<<< HEAD
 import re
-=======
 import subprocess
->>>>>>> 8f60fd7 (sync wip)
 import threading
 import time
 
@@ -29,11 +26,7 @@ class NewNoteCommand(sublime_plugin.WindowCommand):
 		note_view.set_name(title + '.md')
 		note_view.run_command('append', {'characters': '# {}\n\n'.format(title)})
 		note_view.run_command('move_to', {'to': 'eof', 'extend': False})
-<<<<<<< HEAD
-		note_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
-=======
 		note_view.assign_syntax(MARKDOWN_SYNTAX)
->>>>>>> 8f60fd7 (sync wip)
 
 		s = sublime.load_settings("Ntoes.sublime-settings")
 
@@ -200,40 +193,7 @@ class TodoList:
 				if file_name.endswith('.md'):
 					file_path = os.path.join(dirpath, file_name)
 					note_paths.append(file_path)
-<<<<<<< HEAD
-			
-=======
 
-		for file_path in sorted(note_paths, reverse=True):
-			st = os.stat(file_path)
-
-			if file_path in self.note_files:
-				fields = self.note_files[file_path]
-				if st.st_mtime <= fields["mtime"]:
-					continue
-				fields["mtime"] = st.st_mtime
-
-			else:
-				self.add_note_file(file_path)
-
-			self.scan_file(file_path)
-			self.update_view()
-
-	def sync_dir(self):
-		print('SYNC_DIR')
-		s = sublime.load_settings("Ntoes.sublime-settings")
-		base_dir = s.get("base_dir", "~/ntoes/")
-		base_dir = os.path.expanduser(base_dir)
-
-		note_paths = []
-
-		for dirpath, _, filenames in os.walk(base_dir):
-			for file_name in filenames:
-				if file_name.endswith('.md'):
-					file_path = os.path.join(dirpath, file_name)
-					note_paths.append(file_path)
-
->>>>>>> 8f60fd7 (sync wip)
 		for file_path in sorted(note_paths, reverse=True):
 			st = os.stat(file_path)
 
@@ -332,16 +292,12 @@ class ShowTodoCommand(sublime_plugin.WindowCommand):
 			todo_view.set_name('TODO')
 
 			todo_view.settings().set('gutter', False)
-<<<<<<< HEAD
 			todo_view.settings().set('is_todo', True)
 
 			s = sublime.load_settings("Ntoes.sublime-settings")
 			todo_view.settings().set('todo_base_dir', s.get("base_dir", "~/ntoes/"))
 
-			todo_view.assign_syntax('Packages/Markdown/Markdown.sublime-syntax')
-=======
 			todo_view.assign_syntax(MARKDOWN_SYNTAX)
->>>>>>> 8f60fd7 (sync wip)
 			todo_view.run_command('overwrite', {'characters': '# TODO\n\n'})
 			todo_view.run_command('move_to', {"extend": False, "to": "bof"})
 			self.window.run_command('new_pane')
