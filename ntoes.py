@@ -3,7 +3,6 @@ import os
 import re
 import subprocess
 import threading
-import time
 
 import sublime
 import sublime_plugin
@@ -14,15 +13,22 @@ import sublime_plugin
 MARKDOWN_SYNTAX = 'Packages/Markdown/Markdown.sublime-syntax'
 # MARKDOWN_SYNTAX = 'Packages/MarkdownEditing/Markdown.sublime-syntax'
 
+# Time in seconds between directory scans
 SCAN_PERIOD = 10
+
+# Time in seconds between Git syncs
+SYNC_PERIOD = 60
 
 
 class TodoList:
 	def __init__(self):
 		self.note_files = {}
-		self.cancel_scanning = False
-		self.wakeup_event = threading.Event()
+		self.unload_requested = False
+		self.processing_lock = threading.Lock()
+		self.scan_event = threading.Event()
+		self.sync_event = threading.Event()
 		threading.Thread(target=self.scan_forever, daemon=True).start()
+		threading.Thread(target=self.sync_forever, daemon=True).start()
 
 	def get_base_dir(self):
 		s = sublime.load_settings("Ntoes.sublime-settings")
@@ -61,11 +67,8 @@ class TodoList:
 		# todo_view.run_command('select_all')
 		# todo_view.run_command('overwrite', {'characters': text})
 
-	def stop_scanning(self):
-		self.cancel_scanning = True
-
 	def scan_now(self):
-		self.wakeup_event.set()
+		self.scan_event.set()
 
 	def add_new_note_file(self, file_path):
 		st = os.stat(file_path)
@@ -95,6 +98,8 @@ class TodoList:
 					file_path = os.path.join(dirpath, file_name)
 					note_paths.append(file_path)
 
+		# TODO: Handle deleted note files here.
+		
 		for file_path in sorted(note_paths, reverse=True):
 			st = os.stat(file_path)
 
@@ -112,11 +117,52 @@ class TodoList:
 		self.update_todo_view()
 
 	def scan_forever(self):
-		while not self.cancel_scanning:
+		while not self.unload_requested:
 			if self.get_todo_view(): # Only scan if todo list is visible
-				self.scan_dir()
-			self.wakeup_event.wait(SCAN_PERIOD)
-			self.wakeup_event.clear()
+				with self.processing_lock:
+					self.scan_dir()
+			self.scan_event.wait(SCAN_PERIOD)
+			self.scan_event.clear()
+
+	def sync_now(self):
+		self.sync_event.set()
+
+	def exec_git(self, cmd):
+		git_cmd = 'git'
+		cmd = [ git_cmd ] + cmd
+		print(f'$ {" ".join(cmd)}')
+		p = subprocess.run(cmd, text=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		print(p.stdout)
+		return p.stdout
+
+	def sync_dir(self):
+		base_dir = self.get_base_dir()
+		os.chdir(base_dir)
+
+		# Commit any uncommitted changes.
+		status = self.exec_git(['status', '--porcelain'])
+		if len(status) != 0:
+			self.exec_git(['add', '.'])
+			self.exec_git(['commit', '-m', 'detected changes'])
+
+		# Fetch and merge any new changes (and resolve conflicts, leaving markers)
+		self.exec_git(['fetch'])
+		self.exec_git(['merge'])
+		status = self.exec_git(['status', '--porcelain'])
+		if len(status) != 0:
+			self.exec_git(['add', '.'])
+			self.exec_git(['commit', '-m', 'conflict markers'])
+
+		# Submit any changes to the server.
+		self.exec_git(['push'])
+
+	def sync_forever(self):
+		while not self.unload_requested:
+			if self.get_todo_view(): # Only sync if todo list is visible
+				with self.processing_lock:
+					self.sync_dir()
+			self.sync_event.wait(SYNC_PERIOD)
+			self.sync_event.clear()
 
 
 todo_list = TodoList()
@@ -249,11 +295,21 @@ class UpdateTodoViewCommand(sublime_plugin.TextCommand):
 
 
 class NoteViewEventListener(sublime_plugin.ViewEventListener):
-	def on_post_save(self):
-		base_dir = os.path.normpath(todo_list.get_base_dir())
+	def on_post_save_async(self):
+		base_dir = os.path.normpath(todo_list.get_base_dir()) + os.path.sep
 		file_name = os.path.normpath(self.view.file_name())
+
 		if file_name.startswith(base_dir):
 			todo_list.scan_now()
+
+			with todo_list.processing_lock:
+				status = todo_list.exec_git(['status', '--porcelain'])
+
+				if len(status) != 0:
+					todo_list.exec_git(['add', file_name])
+					todo_list.exec_git(['commit', '-m', file_name])
+
+				todo_list.sync_now()
 
 
 class ShowTodoCommand(sublime_plugin.WindowCommand):
@@ -301,33 +357,12 @@ class SetNotesDirCommand(sublime_plugin.WindowCommand):
 
 
 class SyncNotesCommand(sublime_plugin.WindowCommand):
-	def exec_git(self, cmd):
-		print(f'$ {cmd}')
-		try:
-			p = subprocess.run(cmd, check=True, text=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-			print(p.stdout)
-			return p.stdout
-		except subprocess.CalledProcessError as e:
-			raise f'Failed to execute git command: {cmd}\n{e.stdout}'
-
 	def run(self):
-		s = sublime.load_settings("Ntoes.sublime-settings")
-		base_dir = s.get("base_dir", "~/ntoes/")
-		base_dir = os.path.expanduser(base_dir)
-
-		os.chdir(base_dir)
-		self.exec_git(['git', 'fetch'])
-		self.exec_git(['git', 'merge'])
-		status = self.exec_git(['git', 'status', '--porcelain'])
-		if len(status) == 0:
-			return
-		self.exec_git(['git', 'add', '.'])
-		self.exec_git(['git', 'commit', '-m', status])
-		self.exec_git(['git', 'push'])
+		todo_list.sync_now()
 
 	def description(self):
 		return "Synchronize notes with the remote server."
 
 
 def plugin_unloaded():
-	todo_list.stop_scanning()
+	todo_list.unload_requested = True
