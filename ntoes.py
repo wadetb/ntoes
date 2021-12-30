@@ -308,21 +308,90 @@ class UpdateTodoViewCommand(sublime_plugin.TextCommand):
 
 
 class NoteViewEventListener(sublime_plugin.ViewEventListener):
-	def on_post_save_async(self):
+	def is_note_file(self):
 		base_dir = os.path.normpath(todo_list.get_base_dir()) + os.path.sep
 		file_name = os.path.normpath(self.view.file_name())
 
-		if file_name.startswith(base_dir):
-			todo_list.scan_now()
+		return file_name.startswith(base_dir)
 
-			with todo_list.processing_lock:
-				status = todo_list.exec_git(['status', '--porcelain'])
+	def on_load(self):
+		if not self.is_note_file():
+			return
 
-				if len(status) != 0:
-					todo_list.exec_git(['add', file_name])
-					todo_list.exec_git(['commit', '-m', file_name])
+		# Setup completions for note file views.
+		# https://www.sublimetext.com/docs/completions.html
+		self.view.settings().set('auto_complete_triggers', [{
+			'selector': 'text.html.markdown',
+			'characters': '@#'
+			}])
+		self.view.settings().set('auto_complete', True)
+		self.view.settings().set('auto_complete_use_index', True)
+		self.view.settings().set('auto_complete_use_history ', True)
+		
 
-				todo_list.sync_now()
+
+	def on_post_save_async(self):
+		if not self.is_note_file():
+			return
+
+		todo_list.scan_now()
+
+		with todo_list.processing_lock:
+			status = todo_list.exec_git(['status', '--porcelain'])
+
+			if len(status) != 0:
+				todo_list.exec_git(['add', self.view.file_name()])
+				todo_list.exec_git(['commit', '-m', self.view.file_name()])
+
+			todo_list.sync_now()
+
+	# def on_modified(self):
+	# 	print("on_modified")
+
+	# def on_text_changed(self):
+	# 	print("on_text_changed")
+
+	# 	if not self.is_note_file():
+	# 		return
+
+	# 	for change in changes:
+	# 		if change.text == '@':
+	# 			self.view.run_command('auto_complete', {
+	# 				'disable_auto_insert': True,
+	# 				'api_completions_only': True,
+	# 				'next_competion_if_showing': True
+	# 				})
+
+	# def on_query_completions(self, prefix, locations):
+	# 	if not self.is_note_file():
+	# 		return
+
+	# 	print("on_query_completions", prefix, locations)
+	# 	if prefix.startswith('@'):
+	# 		return [ "@jonlee" ]
+
+	# 	if prefix.startswith('#'):
+	# 		return [ "#DEI" ]
+
+	# 	return None
+
+	# 	# sel = view.sel()[0]
+	# 	# regions = view.get_regions('smart_completions')
+	# 	# for i,r in enumerate(regions):
+	# 	#     if r.contains(sel):
+	# 	#         if r == sel:
+	# 	#             edit = view.begin_edit()
+	# 	#             view.erase(edit, r)
+	# 	#             view.end_edit(edit)
+	# 	#         ac = RunSmartSnippetCommand.autocompletions.get(view.id())[i]
+	# 	#         return [(x,x) for x in ac]
+
+	# 	# l = []
+	# 	# for s in SS.snip_files.keys():
+	# 	#     if self.match_scope(view, SS.snip_files.get(s)):
+	# 	#         t = (s[2:]+'\tSMART Snippet',s[2:])
+	# 	#         l.append(t)
+	# 	# return l
 
 
 class ShowTodoCommand(sublime_plugin.WindowCommand):
