@@ -144,14 +144,11 @@ class TodoList:
 		git_cmd = 'git'
 		cmd = [ git_cmd ] + cmd
 		print(f'$ {" ".join(cmd)}')
-		p = subprocess.run(cmd, text=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		p = subprocess.run(cmd, text=True, cwd=self.get_base_dir(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 		print(p.stdout)
 		return p.stdout
 
 	def sync_dir(self):
-		base_dir = self.get_base_dir()
-		os.chdir(base_dir)
-
 		# Commit any uncommitted changes.
 		status = self.exec_git(['status', '--porcelain'])
 		if len(status) != 0:
@@ -329,7 +326,6 @@ class NoteViewEventListener(sublime_plugin.ViewEventListener):
 		self.view.settings().set('auto_complete_use_history ', True)
 		
 
-
 	def on_post_save_async(self):
 		if not self.is_note_file():
 			return
@@ -416,6 +412,7 @@ class ShowTodoCommand(sublime_plugin.WindowCommand):
 			})
 
 		todo_list.scan_now()
+		todo_list.sync_now()
 
 	def description(self):
 		return "Show todo items from all notes in a new view."
