@@ -1,0 +1,6 @@
+[
+    { "caption": "Ntoes: New Note", "command": "new_note" },
+    { "caption": "Ntoes: Sync Notes", "command": "sync_notes" },
+    { "caption": "Ntoes: Show TODO", "command": "show_todo" },
+    { "caption": "Ntoes: Set Directory", "command": "set_notes_dir" },
+]
