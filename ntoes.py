@@ -144,7 +144,7 @@ class TodoList:
 		git_cmd = 'git'
 		cmd = [ git_cmd ] + cmd
 		print(f'$ {" ".join(cmd)}')
-		p = subprocess.run(cmd, text=True, cwd=self.get_base_dir(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+		p = subprocess.run(cmd, text=True, cwd=self.get_base_dir(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
 		print(p.stdout)
 		return p.stdout
 
