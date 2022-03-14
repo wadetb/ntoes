@@ -144,7 +144,8 @@ class TodoList:
 		git_cmd = 'git'
 		cmd = [ git_cmd ] + cmd
 		print(f'$ {" ".join(cmd)}')
-		p = subprocess.run(cmd, text=True, cwd=self.get_base_dir(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+		creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+		p = subprocess.run(cmd, text=True, cwd=self.get_base_dir(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags)
 		print(p.stdout)
 		return p.stdout
 
@@ -286,6 +287,13 @@ class MakeTodoCommand(sublime_plugin.TextCommand):
 		return "Toggles the selected lines todo state."
 
 
+class AppendDateHeadingCommand(sublime_plugin.TextCommand):
+	def run(self, edit):
+		title = datetime.date.today().isoformat()
+		self.view.run_command('append', {'characters': '\n# {}'.format(title)})
+		self.view.run_command('move_to', {'to': 'eof', 'extend': False})
+
+
 class UpdateTodoViewCommand(sublime_plugin.TextCommand):
 	def run(self, edit, text):
 		self.view.replace(edit, sublime.Region(8, self.view.size()), text)
@@ -337,7 +345,7 @@ class NoteViewEventListener(sublime_plugin.ViewEventListener):
 
 			if len(status) != 0:
 				todo_list.exec_git(['add', self.view.file_name()])
-				todo_list.exec_git(['commit', '-m', self.view.file_name()])
+				todo_list.exec_git(['commit', '-m', os.path.basename(self.view.file_name())])
 
 			todo_list.sync_now()
 
